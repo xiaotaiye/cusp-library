@@ -1,0 +1,158 @@
+/*
+ *  Copyright 2008-2009 NVIDIA Corporation
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+
+#pragma once
+
+#include <cusp/blas.h>
+#include <cusp/multiply.h>
+#include <cusp/krylov/arnoldi.h>
+#include <cusp/array1d.h>
+#include <cusp/array2d.h>
+#include <cusp/detail/format_utils.h>
+
+#include <thrust/extrema.h>
+#include <thrust/transform.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/reduce.h>
+
+#include <thrust/detail/integer_traits.h>
+
+namespace cusp
+{
+namespace detail
+{
+
+// absolute<T> computes the absolute value of a number f(x) -> |x|
+template <typename T>
+struct absolute : public thrust::unary_function<T,T>
+{
+    __host__ __device__
+	T operator()(T x)
+	{
+	    return x < 0 ? -x : x;
+	}
+};
+
+// http://burtleburtle.net/bob/hash/integer.html
+inline
+__host__ __device__
+unsigned int hash32(unsigned int a)
+{
+    a = (a + 0x7ed55d16) + (a << 12);
+    a = (a ^ 0xc761c23c) ^ (a >> 19);
+    a = (a + 0x165667b1) + (a <<  5);
+    a = (a + 0xd3a2646c) ^ (a <<  9);
+    a = (a + 0xfd7046c5) + (a <<  3);
+    a = (a ^ 0xb55a4f09) ^ (a >> 16);
+    return a;
+}
+
+template <typename I, typename T>
+struct hash_01
+{
+    __host__ __device__
+    T operator()(const I& index) const
+    {
+        return T(hash32(index)) / T(thrust::detail::integer_traits<unsigned int>::const_max);
+    }
+};
+
+
+template <typename Matrix>    
+double estimate_spectral_radius(const Matrix& A, size_t k = 20)
+{
+    CUSP_PROFILE_SCOPED();
+
+    typedef typename Matrix::index_type   IndexType;
+    typedef typename Matrix::value_type   ValueType;
+    typedef typename Matrix::memory_space MemorySpace;
+
+    const IndexType N = A.num_rows;
+
+    cusp::array1d<ValueType, MemorySpace> x(N);
+    cusp::array1d<ValueType, MemorySpace> y(N);
+
+    // initialize x to random values in [0,1)
+    thrust::transform(thrust::counting_iterator<IndexType>(0),
+                      thrust::counting_iterator<IndexType>(N),
+                      x.begin(),
+                      hash_01<IndexType,ValueType>());
+
+    for(size_t i = 0; i < k; i++)
+    {
+        cusp::blas::scal(x, ValueType(1.0) / cusp::blas::nrmmax(x));
+        cusp::multiply(A, x, y);
+        x.swap(y);
+    }
+   
+    if (k == 0)
+        return 0;
+    else
+        return cusp::blas::nrm2(x) / cusp::blas::nrm2(y);
+}
+
+template <typename Matrix>    
+double ritz_spectral_radius(const Matrix& A, size_t k = 20, size_t m = 10)
+{
+    CUSP_PROFILE_SCOPED();
+
+    typedef typename Matrix::index_type   IndexType;
+    typedef typename Matrix::value_type   ValueType;
+    typedef typename Matrix::memory_space MemorySpace;
+
+    cusp::array2d<ValueType,cusp::host_memory> H;
+    cusp::krylov::arnoldi(A,H,m);
+
+    return estimate_spectral_radius(H,k);
+}
+
+template <typename IndexType, typename ValueType, typename MemorySpace>    
+double disks_spectral_radius(const cusp::coo_matrix<IndexType,ValueType,MemorySpace>& A)
+{
+    CUSP_PROFILE_SCOPED();
+
+    const IndexType N = A.num_rows;
+
+    // compute sum of absolute values for each row of A
+    cusp::array1d<IndexType, MemorySpace> row_sums(N);
+
+    {
+	cusp::array1d<IndexType, MemorySpace> temp(N);
+	thrust::reduce_by_key(  A.row_indices.begin(), A.row_indices.end(),
+				thrust::make_transform_iterator(A.values.begin(), absolute<ValueType>()),
+				temp.begin(),
+				row_sums.begin());
+    }
+
+    return *thrust::max_element(row_sums.begin(), row_sums.end());
+}
+
+template <typename Matrix> 
+double disks_spectral_radius(const Matrix& A)
+{
+    typedef typename Matrix::index_type   IndexType;
+    typedef typename Matrix::value_type   ValueType;
+    typedef typename Matrix::memory_space MemorySpace;
+
+    const cusp::coo_matrix<IndexType,ValueType,MemorySpace> C(A);
+
+    return disks_spectral_radius(C);
+}
+
+} // end namespace detail
+} // end namespace cusp
+
