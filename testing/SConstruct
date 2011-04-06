@@ -1,0 +1,41 @@
+import os
+import inspect
+import glob
+
+# try to import an environment first
+try:
+  Import('env')
+except:
+  exec open("../build/build-env.py")
+  env = Environment()
+
+# on mac we have to tell the linker to link against the C++ library
+if env['PLATFORM'] == "darwin":
+  env.Append(LINKFLAGS = "-lstdc++")
+
+# find all .cus & .cpps in the current directory
+sources = []
+directories = ['.', 'cuda']
+extensions = ['*.cu', '*.cpp']
+for dir in directories:
+  for ext in extensions:
+    regexp = os.path.join(dir, ext)
+    #sources.extend(env.Glob(regexp, strings = True))
+    sources.extend(glob.glob(regexp))
+
+# add the directory containing this file to the include path
+this_file = inspect.currentframe().f_code.co_filename
+this_dir = os.path.dirname(this_file)
+env.Append(CPPPATH = [this_dir])
+
+# by default, we want to build the full unit test suite
+tester = env.Program('tester', sources)
+Default(tester)
+
+# add targets to build individual tests
+core_sources = ['testframework.cu', 'unittest_tester.cu']
+
+for test in glob.glob('*.cu'):
+    if test not in core_sources:
+        name, ext = os.path.splitext(test)
+        env.Program('test_'+name, core_sources+[test])
