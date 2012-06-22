@@ -359,12 +359,18 @@ public:
   // For some reason having the following constructor
   // explicitly makes things faster with at least g++
   __host__ __device__
-    complex<float>(const complex<float> & z)
-    : cuFloatComplex(z){}
+    complex<float>(const complex<float> & z){
+    //    : cuFloatComplex(z){
+    real(z.real());
+    imag(z.imag());        
+  }
 
   __host__ __device__
-    complex<float>(cuFloatComplex z)
-    : cuFloatComplex(z){}
+    complex<float>(cuFloatComplex z){
+    //    : cuFloatComplex(z){
+    real(z.x);
+    imag(z.y);    
+  }
   
   template <class X> 
     inline complex<float>(const std::complex<X> & z)
@@ -460,12 +466,18 @@ public:
   // For some reason having the following constructor
   // explicitly makes things faster with at least g++
   __host__ __device__
-    inline complex<double>(const complex<double> & z)
-    : cuDoubleComplex(z) {}
+    inline complex<double>(const complex<double> & z){
+    //    : cuDoubleComplex(z) {
+    real(z.real());
+    imag(z.imag());    
+  }
 
   __host__ __device__
-    inline complex<double>(cuDoubleComplex z)
-    : cuDoubleComplex(z) {}
+    inline complex<double>(cuDoubleComplex z){
+    //    : cuDoubleComplex(z) {
+    real(z.x);
+    imag(z.y);        
+  }
 
   template <class X> 
     inline complex<double>(const std::complex<X> & z)
